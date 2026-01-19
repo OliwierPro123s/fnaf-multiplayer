@@ -1,4 +1,4 @@
-// client.js - socket + rendering
+// client.js - socket + rendering (updated with playerCount handling)
 const socket = io();
 
 let myId = null;
@@ -23,13 +23,14 @@ const playersList = document.getElementById('players');
 const animsList = document.getElementById('anims');
 const batteryEl = document.getElementById('battery');
 const statusEl = document.getElementById('status');
+const playerCountEl = document.getElementById('playerCount');
 
 socket.on('init', (data) => {
   myId = data.id;
   state.players = data.players;
   state.animatroniks = data.animatroniks || [];
   uiName.innerText = state.players[myId].name + ' (TY)';
-  draw();
+  updateUI();
 });
 
 socket.on('playerJoined', (p) => {
@@ -41,10 +42,14 @@ socket.on('playerLeft', (id) => {
 });
 
 socket.on('state', (s) => {
-  // merge state for smooth rendering (server authoritative)
   state.players = s.players;
   state.animatroniks = s.animatroniks;
   updateUI();
+});
+
+// NEW: playerCount updates from server
+socket.on('playerCount', (count) => {
+  if (playerCountEl) playerCountEl.textContent = `Players: ${count}`;
 });
 
 function updateUI() {
@@ -86,7 +91,6 @@ window.addEventListener('keydown', (e) => {
 
 // drawing
 function drawRoom(x,y,label) {
-  // room box
   ctx.fillStyle = '#121212';
   ctx.strokeStyle = '#333';
   ctx.lineWidth = 2;
@@ -99,28 +103,24 @@ function drawRoom(x,y,label) {
 
 function draw() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // draw rooms
   ROOM_DRAW_ORDER.forEach(r => {
     const p = ROOM_POS[r];
     drawRoom(p.x, p.y, r);
   });
 
-  // draw animatroniks
   state.animatroniks.forEach((a, idx) => {
     const path = a.path;
     const idxRoom = Math.max(0, Math.min(a.pathIdx || 0, path.length-1));
     const from = ROOM_POS[path[idxRoom]] || ROOM_POS.Office;
-    // if progress >0 and next exists, lerp to next
     let pos = { x: from.x, y: from.y };
-    if (a.pathIdx < path.length - 1) {
-      const to = ROOM_POS[path[a.pathIdx+1]];
+    if ((a.pathIdx || 0) < path.length - 1) {
+      const to = ROOM_POS[path[(a.pathIdx || 0)+1]];
       if (to) {
         const t = a.progress || 0;
         pos.x = from.x + (to.x - from.x) * t;
         pos.y = from.y + (to.y - from.y) * t;
       }
     }
-    // color by id
     const colors = ['#ff6666','#66b3ff','#ffff66','#ff66ff','#66ff99','#ffa366'];
     ctx.fillStyle = colors[(a.id-1) % colors.length];
     ctx.beginPath();
@@ -129,12 +129,10 @@ function draw() {
     ctx.fillStyle = '#111';
     ctx.font = '11px system-ui';
     ctx.fillText(a.label, pos.x-20, pos.y-20);
-    // state marker
     ctx.fillStyle = '#fff';
     ctx.fillText(a.state, pos.x-20, pos.y+28);
   });
 
-  // draw players (office)
   Object.values(state.players).forEach(p => {
     const pos = p.pos || ROOM_POS.Office;
     ctx.fillStyle = p.id === myId ? '#ffffff' : '#ffcc00';
@@ -145,7 +143,6 @@ function draw() {
     ctx.fillStyle = '#000';
     ctx.font = '12px system-ui';
     ctx.fillText(p.name, pos.x-20, pos.y-16);
-    // draw left/right door indicator near OfficeDoor
     if (p.id === myId) {
       ctx.fillStyle = '#ddd';
       ctx.fillText(`Drzwi L:${p.doors.left ? 'C' : 'O'} R:${p.doors.right ? 'C' : 'O'}`, 10, canvas.height - 20);
@@ -154,5 +151,4 @@ function draw() {
 
   requestAnimationFrame(draw);
 }
-
-draw();
+requestAnimationFrame(draw);
