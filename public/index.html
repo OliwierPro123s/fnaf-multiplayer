@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <title>FNAF-like Multiplayer (placeholder)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="ui">
+    <div id="topbar">
+      <div id="name">Łączenie...</div>
+      <div id="controls">Q/E - drzwi L/P • C - kamery • F - latarka</div>
+      <div id="battery">Bateria: 100</div>
+    </div>
+    <div id="main">
+      <canvas id="game" width="900" height="520"></canvas>
+      <div id="rightpanel">
+        <h3>Gracze</h3>
+        <ul id="players"></ul>
+        <h3>Animatroniki</h3>
+        <ul id="anims"></ul>
+        <div id="status"></div>
+      </div>
+    </div>
+    <div id="footer">Uruchom w kilku kartach, to lokalny multiplayer (Socket.IO)</div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
