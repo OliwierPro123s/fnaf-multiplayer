@@ -162,7 +162,6 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
   </div>
 </div>
 
-<!-- Multiplayer menu (rozszerzone) -->
 <div class="multiplayer-menu" id="multiplayerMenu">
   <h1>Multiplayer</h1>
   <p style="color:#fff;margin-bottom:12px;">Wybierz sposób przypisania koloru</p>
@@ -217,7 +216,7 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
     <span class="volume-value" id="volumeValue">100</span>%
   </div>
 
-  <!-- DODANO: wybór utworu (oryginalny + 9 nowych) -->
+  <!-- DODANO: wybór utworu (oryginalny + 9 nowych) --> 
   <div class="playlist-row">
     <label for="trackSelect">Utwór:</label>
     <select id="trackSelect">
@@ -301,7 +300,6 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
 // ---------- MULTIPLAYER CONFIG ----------
 const MULTIPLAYER_WS = 'wss://your-multiplayer-server.example/ws'; // <-- wstaw swój serwer WebSocket tutaj
 
-// ---------- UI references (existing ones kept) ----------
 const mainMenu = document.getElementById('mainMenu');
 const modeMenu = document.getElementById('modeMenu');
 const difficultyMenu = document.getElementById('difficultyMenu');
@@ -461,7 +459,7 @@ function getVariantSVG(variant, color){
   // choose fill / stroke depending on color for pawn-styled look
   // white: white fill + black stroke; black: black fill + white stroke
   const fill = (color==='white') ? '#ffffff' : '#111111';
-  const stroke = (color==='white') ? '#111111' : '#ffffff';
+  const stroke = (color==='white') ? '#111111' : '#ffffff'; 
   const smallStroke = (color==='white') ? '#2b2b2b' : '#cfcfcf';
 
   // base pawn silhouette (rounded base + body + head) with variant-specific ornament
@@ -1539,7 +1537,7 @@ function showIncomingInvite(inv){
 function closeInviteModal(){
   inviteModal.style.display = 'none';
   inviteModal.setAttribute('aria-hidden', 'true');
-  inviteText.textContent = '';
+  inviteText.textContent = ''; 
   inviteButtons.innerHTML = '';
   inviteOptions.style.display = 'none';
 }
