@@ -98,6 +98,27 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
 .campaign-controls{margin-top:12px}
 .campaign-controls button{margin:6px;padding:8px 18px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;cursor:pointer}
 
+/* multiplayer lobby specific */
+#lobbyControls{margin-top:12px;color:#fff}
+#nickInput{padding:6px 10px;border-radius:8px;background:transparent;color:#fff;border:2px solid #fff;margin-bottom:10px;width:200px}
+#connectBtn{display:inline-block;padding:8px 12px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;cursor:pointer}
+#playersList{margin-top:12px;text-align:left;max-height:180px;overflow:auto;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);width:320px;background:rgba(255,255,255,0.02)}
+.player-row{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px dashed rgba(255,255,255,0.04)}
+.player-row:last-child{border-bottom:none}
+.player-nick{color:#fff}
+.duel-btn{padding:6px 10px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;cursor:pointer;margin-left:8px}
+.duel-btn:hover{background:#fff;color:#1f1c2c}
+
+/* invite modal */
+#inviteModal{display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;border:2px solid #fff;color:#fff;z-index:999}
+#inviteModal button{margin:6px;padding:6px 12px;border-radius:8px;border:2px solid #fff;background:transparent;color:#fff;cursor:pointer}
+#inviteModal .modal-row{margin:8px 0;text-align:center}
+
+/* small status */
+#multiplayerStatus{color:#fff;margin-top:8px}
+
+/* responsive tweak */
+@media (max-width:520px){ .menu,.mode-menu,.difficulty-menu,.options-menu,.time-menu,.promotion-menu{padding:18px 26px} .chessboard{transform:scale(0.8)} }
 </style>
 </head>
 <body>
@@ -141,10 +162,22 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
   </div>
 </div>
 
-<!-- Menu multiplayer (nowe) -->
+<!-- Multiplayer menu (rozszerzone) -->
 <div class="multiplayer-menu" id="multiplayerMenu">
   <h1>Multiplayer</h1>
   <p style="color:#fff;margin-bottom:12px;">Wybierz sposób przypisania koloru</p>
+
+  <!-- Lobby UI: nick, connect, players list -->
+  <div id="lobbyControls">
+    <input id="nickInput" placeholder="Twój nick" maxlength="20" />
+    <div>
+      <button id="connectBtn">Połącz z serwerem</button>
+      <button id="disconnectBtn" style="display:none">Rozłącz</button>
+    </div>
+    <div id="multiplayerStatus">Niepołączony</div>
+    <div id="playersList" aria-live="polite"></div>
+  </div>
+
   <button id="randomMultiplayerBtn">Random (50% Biały / 50% Czarny)</button>
   <button id="localMultiplayerBtn">Gra lokalna (wybierz ręcznie)</button>
   <button id="backMultiplayerBtn">Powrót</button>
@@ -250,8 +283,25 @@ h1{color:#fff;text-align:center;margin-bottom:20px}
 <!-- oryginalny element audio — zachowany -->
 <audio id="bgMusic" loop src="https://www.bensound.com/bensound-music/bensound-epic.mp3"></audio>
 
+<!-- invite modal (for incoming invites and for sending duel options) -->
+<div id="inviteModal" role="dialog" aria-hidden="true">
+  <div id="inviteText"></div>
+  <div class="modal-row" id="inviteOptions" style="display:none">
+    <label>Wybierz kolor:</label>
+    <select id="inviteColorSelect">
+      <option value="random">Losowo</option>
+      <option value="white">Biały</option>
+      <option value="black">Czarny</option>
+    </select>
+  </div>
+  <div class="modal-row" id="inviteButtons"></div>
+</div>
+
 <script>
-// ---------- UI references ----------
+// ---------- MULTIPLAYER CONFIG ----------
+const MULTIPLAYER_WS = 'wss://your-multiplayer-server.example/ws'; // <-- wstaw swój serwer WebSocket tutaj
+
+// ---------- UI references (existing ones kept) ----------
 const mainMenu = document.getElementById('mainMenu');
 const modeMenu = document.getElementById('modeMenu');
 const difficultyMenu = document.getElementById('difficultyMenu');
@@ -293,6 +343,21 @@ let campaignOpponents = [];
 
 const chooseWhiteBtn = document.getElementById('chooseWhiteBtn');
 const chooseBlackBtn = document.getElementById('chooseBlackBtn');
+
+// multiplayer lobby refs
+const multiplayerMenu = document.getElementById('multiplayerMenu');
+const nickInput = document.getElementById('nickInput');
+const connectBtn = document.getElementById('connectBtn');
+const disconnectBtn = document.getElementById('disconnectBtn');
+const playersListEl = document.getElementById('playersList');
+const multiplayerStatus = document.getElementById('multiplayerStatus');
+
+// invite modal refs
+const inviteModal = document.getElementById('inviteModal');
+const inviteText = document.getElementById('inviteText');
+const inviteButtons = document.getElementById('inviteButtons');
+const inviteOptions = document.getElementById('inviteOptions');
+const inviteColorSelect = document.getElementById('inviteColorSelect');
 
 // campaign UI refs
 const campaignMenu = document.getElementById('campaignMenu');
@@ -621,6 +686,7 @@ function clickCell(r,c){
       selected=null; drawBoard();
       checkPromotion(r,c);
       checkCheckMateOrStalemate();
+      // do NOT auto-run botMove in multiplayer mode
       if(!gameOver && !isMultiplayer && turn===botColor) setTimeout(()=>{ botMove(); },300);
       return;
     } else { selected=null; drawBoard(); return; }
@@ -1274,6 +1340,271 @@ trackSelect.addEventListener('change', ()=>{
   bgMusic.src = url;
   if(wasPlaying){ ensureAudioContext(); bgMusic.play().catch(()=>{}); }
 });
+
+// =================== MULTIPLAYER CLIENT LOGIKA ===================
+
+let ws = null;
+let connected = false;
+let myNick = localStorage.getItem('usz_nick') || '';
+nickInput.value = myNick || '';
+let currentPlayers = []; // array of nick strings
+let pendingInvite = null; // {from, gameType, color}
+
+// helper: render players list
+function renderPlayers(){
+  playersListEl.innerHTML = '';
+  if(!connected){
+    playersListEl.innerHTML = '<div style="color:#ccc;padding:8px">Brak połączenia z serwerem.</div>';
+    return;
+  }
+  if(currentPlayers.length === 0){
+    playersListEl.innerHTML = '<div style="color:#ccc;padding:8px">Brak innych graczy online.</div>';
+    return;
+  }
+  currentPlayers.forEach(nick=>{
+    // do not show yourself in list
+    if(nick === myNick) return;
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    const nameSpan = document.createElement('div');
+    nameSpan.className = 'player-nick';
+    nameSpan.textContent = nick;
+    const btns = document.createElement('div');
+    // Duel button
+    const duelBtn = document.createElement('button');
+    duelBtn.className = 'duel-btn';
+    duelBtn.textContent = 'Duel';
+    duelBtn.onclick = ()=> openInviteDialog(nick);
+    btns.appendChild(duelBtn);
+    row.appendChild(nameSpan);
+    row.appendChild(btns);
+    playersListEl.appendChild(row);
+  });
+}
+
+// connect/disconnect
+connectBtn.addEventListener('click', ()=>{
+  const nick = (nickInput.value || '').trim();
+  if(!nick){ alert('Wpisz nick przed połączeniem.'); return; }
+  myNick = nick;
+  localStorage.setItem('usz_nick', myNick);
+  connectToServer();
+});
+disconnectBtn.addEventListener('click', ()=>{ disconnectFromServer(); });
+
+function connectToServer(){
+  if(connected || ws) return;
+  multiplayerStatus.textContent = 'Łączenie...';
+  try{
+    ws = new WebSocket(MULTIPLAYER_WS);
+  }catch(e){
+    multiplayerStatus.textContent = 'Błąd inicjalizacji WebSocket.';
+    console.error(e);
+    return;
+  }
+  ws.addEventListener('open', ()=>{
+    connected = true;
+    multiplayerStatus.textContent = 'Połączono';
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = '';
+    // join with nick
+    ws.send(JSON.stringify({ type:'join', nick: myNick }));
+  });
+  ws.addEventListener('message', (ev)=>{
+    try{
+      const msg = JSON.parse(ev.data);
+      handleServerMessage(msg);
+    }catch(e){ console.warn('Invalid ws message', e, ev.data); }
+  });
+  ws.addEventListener('close', ()=>{
+    connected = false;
+    multiplayerStatus.textContent = 'Rozłączono';
+    connectBtn.style.display = '';
+    disconnectBtn.style.display = 'none';
+    ws = null;
+    currentPlayers = [];
+    renderPlayers();
+  });
+  ws.addEventListener('error', (err)=>{
+    console.warn('ws error', err);
+    multiplayerStatus.textContent = 'Błąd połączenia z serwerem';
+  });
+}
+
+function disconnectFromServer(){
+  if(!ws) return;
+  try{ ws.send(JSON.stringify({ type:'leave', nick: myNick })); }catch(e){}
+  ws.close();
+  ws = null;
+  connected = false;
+  multiplayerStatus.textContent = 'Rozłączono';
+  connectBtn.style.display = '';
+  disconnectBtn.style.display = 'none';
+  currentPlayers = [];
+  renderPlayers();
+}
+
+// handle messages from server
+function handleServerMessage(msg){
+  switch(msg.type){
+    case 'players':
+      // Replace full list
+      currentPlayers = Array.isArray(msg.players) ? msg.players.slice() : [];
+      renderPlayers();
+      break;
+    case 'player_join':
+      if(!currentPlayers.includes(msg.nick)) currentPlayers.push(msg.nick);
+      renderPlayers();
+      break;
+    case 'player_leave':
+      currentPlayers = currentPlayers.filter(n => n !== msg.nick);
+      renderPlayers();
+      break;
+    case 'invite':
+      // incoming invite
+      pendingInvite = { from: msg.from, gameType: msg.gameType || 'standard', color: msg.color || 'random' };
+      showIncomingInvite(pendingInvite);
+      break;
+    case 'invite_response':
+      // response to an invite you sent
+      if(msg.accept){
+        // start game (server informs both sides)
+        // but we'll also wait for start_game message; optionally handle here
+        multiplayerStatus.textContent = `${msg.from} zaakceptował zaproszenie. Oczekiwanie na start...`;
+      } else {
+        multiplayerStatus.textContent = `${msg.from} odrzucił twoje zaproszenie.`;
+      }
+      break;
+    case 'start_game':
+      // payload: { with: otherNick, colorFor: { you: 'white', other: 'black' }, time: seconds }
+      startMultiplayerMatch(msg);
+      break;
+    default:
+      console.warn('Unknown ws msg', msg);
+  }
+}
+
+// Open a dialog to invite a player (choose game type/color)
+function openInviteDialog(targetNick){
+  inviteModal.style.display = 'block';
+  inviteModal.setAttribute('aria-hidden', 'false');
+  inviteText.textContent = `Wyślij zaproszenie do ${targetNick} — wybierz tryb gry:`;
+  inviteOptions.style.display = 'block';
+  inviteButtons.innerHTML = '';
+  const standardBtn = document.createElement('button');
+  standardBtn.textContent = 'Standardowa gra';
+  standardBtn.onclick = ()=> {
+    const chosenColor = inviteColorSelect.value || 'random';
+    sendInvite(targetNick, 'standard', chosenColor);
+    closeInviteModal();
+  };
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Anuluj';
+  cancelBtn.onclick = ()=> closeInviteModal();
+  inviteButtons.appendChild(standardBtn);
+  inviteButtons.appendChild(cancelBtn);
+}
+
+// show incoming invite with accept/decline
+function showIncomingInvite(inv){
+  inviteModal.style.display = 'block';
+  inviteModal.setAttribute('aria-hidden', 'false');
+  inviteOptions.style.display = 'none';
+  inviteText.textContent = `Otrzymałeś zaproszenie od ${inv.from} do gry (${inv.gameType}).`;
+  inviteButtons.innerHTML = '';
+  const accept = document.createElement('button');
+  accept.textContent = 'Akceptuj';
+  accept.onclick = ()=> {
+    // send response
+    if(ws && connected){
+      ws.send(JSON.stringify({ type:'invite_response', to: inv.from, from: myNick, accept: true, color: inv.color || 'random' }));
+    }
+    // wait for server to send start_game (server should coordinate colors)
+    closeInviteModal();
+  };
+  const decline = document.createElement('button');
+  decline.textContent = 'Odrzuć';
+  decline.onclick = ()=> {
+    if(ws && connected){
+      ws.send(JSON.stringify({ type:'invite_response', to: inv.from, from: myNick, accept: false }));
+    }
+    pendingInvite = null;
+    closeInviteModal();
+  };
+  inviteButtons.appendChild(accept);
+  inviteButtons.appendChild(decline);
+}
+
+// close modal
+function closeInviteModal(){
+  inviteModal.style.display = 'none';
+  inviteModal.setAttribute('aria-hidden', 'true');
+  inviteText.textContent = '';
+  inviteButtons.innerHTML = '';
+  inviteOptions.style.display = 'none';
+}
+
+// send invite to server
+function sendInvite(target, gameType='standard', color='random'){
+  if(!ws || !connected){ alert('Nie jesteś połączony z serwerem.'); return; }
+  ws.send(JSON.stringify({ type:'invite', to: target, from: myNick, gameType, color }));
+  multiplayerStatus.textContent = `Wysłano zaproszenie do ${target} (${gameType})...`;
+}
+
+// handle start_game message coming from server — start local multiplayer match
+function startMultiplayerMatch(msg){
+  // msg: { with: otherNick, colorFor: { you:'white'|'black', other:'white'|'black' }, time: seconds (optional) }
+  isMultiplayer = true;
+  isCampaign = false;
+  offerDrawBtn.style.display = ''; // multiplayer can propose draws if you want
+  resignBtn.style.display = '';
+  // hide server UI
+  multiplayerMenu.style.display = 'none';
+  mainMenu.style.display = 'none';
+  timeMenu.style.display = 'none';
+  campaignMenu.style.display = 'none';
+
+  // set nick/other and colors
+  const other = msg.with || (msg.other || 'opponent');
+  const colorFor = msg.colorFor || { you: 'white', other: 'black' };
+
+  playerColor = colorFor.you;
+  // no bot in multiplayer
+  botColor = (playerColor === 'white') ? 'black' : 'white';
+  updateColorsFromSelection();
+
+  // time if provided
+  const timeSec = (typeof msg.time === 'number') ? msg.time : 0;
+  totalTime = timeSec;
+  whiteTime = blackTime = totalTime;
+
+  // setup board and show UI
+  gameBoard.style.display = 'block';
+  setupBoard();
+  info.textContent = `Gra multiplayer z ${other}. Twój kolor: ${playerColor}.`;
+  backToMenuBtn.style.display = 'none';
+  campaignStatus.style.display = 'none';
+  campaignResultButtons.style.display = 'none';
+  if(totalTime > 0) startTimer();
+
+  // In multiplayer we DO NOT call botMove. Moves come from local player interactions.
+  // Optionally, you might connect a real-time move exchange via websocket: that is not included
+  // here (requires server logic and move message handling). This code prepares the local game state.
+
+  // If you want to integrate real-time move sync:
+  // - On movePiece, after making the move, send a message with move coordinates to server
+  // - On receiving opponent's move message from server, apply it locally with movePiece(...)
+}
+
+// optional: attempt to update players list every few seconds if server supports it
+setInterval(()=>{
+  if(ws && ws.readyState === WebSocket.OPEN){
+    try{ ws.send(JSON.stringify({ type:'list_request' })); }catch(e){} // server may reply with 'players'
+  }
+}, 8000);
+
+// ==================== END MULTIPLAYER LOGIKA ====================
+
 </script>
 </body>
 </html>
